@@ -9,7 +9,10 @@ const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 // 1. Подключаем middleware Clerk для обработки сессий авторизации
-app.use(clerkMiddleware());
+app.use(clerkMiddleware({
+    publishableKey: process.env.CLERK_PUBLISHABLE_KEY,
+    secretKey: process.env.CLERK_SECRET_KEY
+}));
 
 // 2. Webhook Stripe должен получать RAW body (сырые данные), а не обработанный JSON!
 app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, res) => {

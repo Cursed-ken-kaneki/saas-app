@@ -158,7 +158,70 @@
             const tempDiv = document.createElement("div");
             tempDiv.textContent = str; // Добавляем текст как текст, а не HTML
             return tempDiv.innerHTML; // Возвращаем очищенный HTML
-          }user_name || "Anonim") + "</div><div class=\"text-sm text-gray-200\">" + (msg.text || "") + "</div>";
+          }function subscribeToRealtime(roomId) {
+            if (!supabase) return;
+
+            supabase
+                    .channel("public:messages")
+                    .on(
+                            "postgres_changes",
+                            {
+                              event: "INSERT",
+                              schema: "public",
+                              table: "messages",
+                              filter: `room_id=eq.${roomId}`
+                            },
+                            payload => {
+                              console.log("Новое сообщение:", payload);
+
+                              if (!payload || !payload.new) {
+                                console.error("Некорректные данные в payload:", payload);
+                                return;
+                              }
+
+                              const list = document.getElementById("messages-list");
+                              if (!list) {
+                                console.error("Не найден элемент messages-list");
+                                return;
+                              }
+
+                              const { user_name = "Аноним", text = "" } = payload.new;
+
+                              const div = document.createElement("div");
+                              div.className = "bg-gray-800 p-3 rounded-lg max-w-lg";
+                              div.innerHTML = `
+          <div class="text-xs text-indigo-400 font-bold mb-1">
+            ${sanitizeHTML(user_name)}
+          </div>
+          <div class="text-sm text-gray-200">
+            ${sanitizeHTML(text)}
+          </div>
+          <button class="button-class text-sm bg-blue-600 px-3 py-1 mt-2 text-white rounded">
+            Нажми меня
+          </button>
+        `;
+
+                              list.appendChild(div);
+                              list.scrollTop = list.scrollHeight;
+                            }
+                    )
+                    .subscribe();
+          }
+
+// Функция для очистки текста
+          function sanitizeHTML(str) {
+            const tempDiv = document.createElement("div");
+            tempDiv.textContent = str;
+            return tempDiv.innerHTML;
+          }
+
+// Делегирование событий для кнопок
+          document.addEventListener("click", function (event) {
+            // Проверка на соответствие кнопки классу
+            if (event.target && event.target.matches(".button-class")) {
+              alert("Кнопка нажата!"); // Реализуйте свою логику здесь
+            }
+          });user_name || "Anonim") + "</div><div class=\"text-sm text-gray-200\">" + (msg.text || "") + "</div>";
           list.appendChild(div);
         });
       }

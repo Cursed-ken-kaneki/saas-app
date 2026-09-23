@@ -98,7 +98,67 @@
         messages.forEach(msg => {
           const div = document.createElement("div");
           div.className = "bg-gray-800 p-3 rounded-lg max-w-lg";
-          div.innerHTML = "0div class=\"text-xs text-indigo-400 font-bold mb-1\">" + (msg.user_name || "Anonim") + "</div><div class=\"text-sm text-gray-200\">" + (msg.text || "") + "</div>";
+          div.innerHTML = "0div class=\"text-xs text-indigo-400 font-bold mb-1\">" + (msg.function subscribeToRealtime(roomId) {
+            if (!supabase) return;
+
+            supabase
+                    .channel("public:messages")
+                    .on(
+                            "postgres_changes",
+                            {
+                              event: "INSERT",
+                              schema: "public",
+                              table: "messages",
+                              filter: `room_id=eq.${roomId}`
+                            },
+                            payload => {
+                              console.log("Новое сообщение:", payload); // Лог для проверки
+
+                              if (!payload || !payload.new) {
+                                console.error("Некорректные данные в payload:", payload);
+                                return;
+                              }
+
+                              const list = document.getElementById("messages-list");
+                              if (!list) {
+                                console.error("Не найден элемент messages-list");
+                                return;
+                              }
+
+                              const { user_name = "Аноним", text = "" } = payload.new;
+
+                              // Очистка текста от лишних символов
+                              const cleanUserName = sanitizeHTML(user_name);
+                              const cleanText = sanitizeHTML(text);
+
+                              // Создание сообщения
+                              const div = document.createElement("div");
+                              div.className = "bg-gray-800 p-3 rounded-lg max-w-lg";
+                              div.innerHTML = `
+          <div class="text-xs text-indigo-400 font-bold mb-1">
+            ${cleanUserName}
+          </div>
+          <div class="text-sm text-gray-200">
+            ${cleanText}
+          </div>
+        `;
+
+                              // Добавление сообщения
+                              list.appendChild(div);
+
+                              // Пролистываем список до конца
+                              list.scrollTop = list.scrollHeight;
+                            }
+                    )
+                    .subscribe();
+          }
+
+// Простая функция для очистки текста
+          function sanitizeHTML(str) {
+            const tempDiv = document.createElement("div");
+            tempDiv.textContent = str; // Добавляем текст как текст, а не HTML
+            return tempDiv.innerHTML; // Возвращаем очищенный HTML
+          }user_name || "Anonim") + "</div><div class=\"text-sm text-gray-200\">" + (msg.text || "") + "</div>";
           list.appendChild(div);
         });
       }

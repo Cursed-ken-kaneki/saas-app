@@ -58,7 +58,7 @@
 
     async function loadRooms() {
       try {
-        const res = await fetch(DBACKEND_URL + "/api/rooms");
+        const res = await fetch(BACKEND_URL + "/api/rooms");
         const rooms = await res.json();
         
         const list = document.getElementById("rooms-list");
@@ -155,7 +155,7 @@
       const name = input.value.trim();
       if (!name) return;
 
-      await fetch(DBACKEND_URL + "/api/rooms", {
+      await fetch(BACKEND_URL + "/api/rooms", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name })

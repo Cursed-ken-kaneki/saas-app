@@ -1,71 +1,161 @@
-require('dotenv').config();
-const express = require('express');
-const Stripe = require('stripe');
-const { createClient } = require('@supabase/supabase-js');
-const { clerkMiddleware, getAuth } = require('@clerk/express');
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import Stripe from 'stripe';
+import { createClient } from '@supabase/supabase-js';
+import { clerkMiddleware } from '@clerk/express';
+
+dotenv.config();
 
 const app = express();
-const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+const port = process.env.PORT || 3000;
 
-// 1. Подключаем middleware Clerk для обработки сессий авторизации
-app.use(clerkMiddleware());
+// Инициализация клиентов
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const supabase = createClient(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
-// 2. Webhook Stripe должен получать RAW body (сырые данные), а не обработанный JSON!
-app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-    const sig = req.headers['stripe-signature'];
-    let event;
+// Middleware
+app.use(cors());
+app.use(express.static('public'));
 
-    try {
-        event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
-    } catch (err) {
-        console.error('Ошибка Webhook:', err.message);
-        return res.status(400).send(`Webhook Error: ${err.message}`);
+// ВЕБХУК STRIPE (должен быть ДО express.json(), так как требует raw body)
+app.post(
+    '/api/webhook',
+    express.raw({ type: 'application/json' }),
+    async (req, res) => {
+        const sig = req.headers['stripe-signature'];
+        let event;
+
+        try {
+            event = stripe.webhooks.constructEvent(
+                req.body,
+                sig,
+                process.env.STRIPE_WEBHOOK_SECRET
+            );
+        } catch (err) {
+            console.error(`Webhook Error: ${err.message}`);
+            return res.status(400).send(`Webhook Error: ${err.message}`);
+        }
+
+        if (event.type === 'checkout.session.completed') {
+            const session = event.data.object;
+            const userId = session.client_reference_id;
+
+            // Обновляем статус подписки пользователя в Supabase
+            if (userId) {
+                const { error } = await supabase
+                    .from('users')
+                    .upsert({ id: userId, is_pro: true, stripe_customer_id: session.customer });
+
+                if (error) {
+                    console.error('Ошибка обновления базы данных:', error);
+                } else {
+                    console.log(`Пользователь ${userId} получил Pro-статус!`);
+                }
+            }
+        }
+
+        res.json({ received: true });
     }
+);
 
-    // Обработка успешной оплаты подписки
-    if (event.type === 'checkout.session.completed') {
-        const session = event.data.object;
-        const userId = session.metadata.userId; // Читаем ID пользователя из Clerk
-
-        // Обновляем статус подписки в Supabase
-        const { error } = await supabase
-            .from('users')
-            .update({ subscription_status: 'pro' })
-            .eq('id', userId);
-
-        if (error) console.error('Ошибка обновления базы:', error);
-    }
-
-    res.json({ received: true });
-});
-
-// 3. Middleware для парсинга JSON для всех остальных роутов
+// Парсинг JSON для всех остальных маршрутов
 app.use(express.json());
 
-// 4. Маршрут для создания сессии оплаты Stripe
-app.post('/api/create-checkout-session', async (req, res) => {
-    const { userId } = getAuth(req);
+// Clerk Middleware
+app.use(
+    clerkMiddleware({
+        publishableKey: process.env.CLERK_PUBLISHABLE_KEY,
+        secretKey: process.env.CLERK_SECRET_KEY,
+    })
+);
 
-    if (!userId) {
-        return res.status(401).json({ error: 'Необходима авторизация через Clerk' });
+// --- ЭНДПОИНТЫ МЕССЕНДЖЕРА ---
+
+// 1. Получить список всех комнат
+app.get('/api/rooms', async (req, res) => {
+    const { data, error } = await supabase
+        .from('rooms')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+});
+
+// 2. Создать новую комнату
+app.post('/api/rooms', async (req, res) => {
+    const { name } = req.body;
+    if (!name) return res.status(400).json({ error: 'Укажите название комнаты' });
+
+    const { data, error } = await supabase
+        .from('rooms')
+        .insert([{ name }])
+        .select();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data[0]);
+});
+
+// 3. Получить истории сообщений конкретной комнаты
+app.get('/api/rooms/:roomId/messages', async (req, res) => {
+    const { roomId } = req.params;
+    const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('room_id', roomId)
+        .order('created_at', { ascending: true });
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+});
+
+// 4. Отправить сообщение
+app.post('/api/messages', async (req, res) => {
+    const { roomId, userId, userName, text } = req.body;
+
+    if (!roomId || !userId || !text) {
+        return res.status(400).json({ error: 'Не заполнено одно из обязательных полей' });
     }
+
+    const { data, error } = await supabase
+        .from('messages')
+        .insert([
+            {
+                room_id: roomId,
+                user_id: userId,
+                user_name: userName || 'Аноним',
+                text,
+            },
+        ])
+        .select();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data[0]);
+});
+
+// --- ЭНДПОИНТЫ ПЛАТЕЖЕЙ ---
+
+// Создание сессии оплаты
+app.post('/api/create-checkout-session', async (req, res) => {
+    const { userId } = req.body;
 
     try {
         const session = await stripe.checkout.sessions.create({
             payment_method_types: ['card'],
-            mode: 'subscription',
             line_items: [
                 {
                     price: process.env.STRIPE_PRICE_ID,
                     quantity: 1,
                 },
             ],
-            metadata: {
-                userId: userId, // Передаем ID пользователя из Clerk в метаданные Stripe
-            },
-            success_url: `${process.env.CLIENT_URL}/success`,
-            cancel_url: `${process.env.CLIENT_URL}/cancel`,
+            mode: 'subscription',
+            client_reference_id: userId,
+            success_url: `${process.env.CLIENT_URL || 'http://localhost:3000'}?success=true`,
+            cancel_url: `${process.env.CLIENT_URL || 'http://localhost:3000'}?canceled=true`,
         });
 
         res.json({ url: session.url });
@@ -74,5 +164,11 @@ app.post('/api/create-checkout-session', async (req, res) => {
     }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Сервер запущен на порту ${PORT}`));
+// Проверка работы сервера
+app.get('/', (req, res) => {
+    res.send('SaaS Messenger Backend is running!');
+});
+
+app.listen(port, () => {
+    console.log(`Сервер запущен на порту ${port}`);
+});

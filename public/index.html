@@ -107,19 +107,32 @@
 
     function subscribeToRealtime(roomId) {
       if (!supabase) return;
+
       supabase
-        .channel("public:messages")
-        .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter:  room_id=eq." + roomId }, 
-          payload => {
-            const list = document.getElementById("messages-list");
-            const div = document.createElement("div");
-            div.className = "bg-gray-800 p-3 rounded-lg max-w-lg";
-            div.innerHTML = "<div class=\"text-xs text-indigo-400 font-bold mb-1\">" + (payload.new.user_name || "Anonim") + "</div><div class=\"text-sm text-gray-200\">" + (payload.new.text || "") + "</div~";
-            list.appendChild(div);
-            list.scrollTop = list.scrollHeight;
-          }
-        )
-        .subscribe();
+              .channel("public:messages")
+              .on(
+                      "postgres_changes",
+                      { event: "INSERT", schema: "public", table: "messages", filter: `room_id=eq.${roomId}` },
+                      payload => {
+                        const list = document.getElementById("messages-list");
+                        const div = document.createElement("div");
+                        div.className = "bg-gray-800 p-3 rounded-lg max-w-lg";
+
+                        // Создаем содержимое с использованием шаблонных строк
+                        div.innerHTML = `
+          <div class="text-xs text-indigo-400 font-bold mb-1">
+            ${payload.new.user_name || "Anonim"}
+          </div>
+          <div class="text-sm text-gray-200">
+            ${payload.new.text || ""}
+          </div>
+        `;
+
+                        list.appendChild(div);
+                        list.scrollTop = list.scrollHeight; // Скроллим вниз
+                      }
+              )
+              .subscribe();
     }
 
     document.getElementById("btn-send-message").onclick = async function() {
